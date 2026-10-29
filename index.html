@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Stash & Pantry Tracker</title>
+  <!-- Tailwind CSS & Alpine.js -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @media print { .no-print { display: none !important; } .print-only { display: block !important; } }
+    .print-only { display: none; }
+  </style>
+  <script>
+    // === PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE ===
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzlkIoc3atFjT2sxLRpsMtB5EOUwMmUYJPgZMr5g6WxFccYPXuKvAQIoFpBC0I3RsL0/exec";
+  </script>
+</head>
+<body class="bg-gray-100 text-gray-800 min-h-screen pb-12" x-data="stashApp()" x-init="initApp()">
+
+  <!-- PRINTABLE HEADER -->
+  <div class="print-only p-6 border-b-2 border-black mb-4">
+    <h1 class="text-2xl font-bold uppercase tracking-wider">Emergency Stash Cupboard Master Sheet</h1>
+    <p class="text-sm text-gray-600">Printed on: <span x-text="new Date().toLocaleDateString('en-GB')"></span></p>
+  </div>
+
+  <div class="max-w-4xl mx-auto p-4 md:p-6">
+    
+    <!-- HEADER -->
+    <header class="no-print flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+      <div>
+        <h1 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+          <i data-lucide="shield-alert" class="w-6 h-6 text-amber-600"></i>
+          Emergency Stash Tracker
+        </h1>
+        <p class="text-xs text-gray-500">Shared Google Sheet Backend & Rotation System</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button @click="fetchFromGoogle()" :disabled="isLoading" class="flex items-center gap-1.5 text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition">
+          <i data-lucide="refresh-cw" class="w-4 h-4" :class="{ 'animate-spin': isLoading }"></i>
+          <span x-text="isLoading ? 'Syncing...' : 'Sync Now'"></span>
+        </button>
+
+        <button @click="requestNotificationPermission()" class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition"
+                :class="notificationsEnabled ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'">
+          <i data-lucide="bell" class="w-4 h-4"></i>
+          <span x-text="notificationsEnabled ? 'Alerts Active' : 'Enable Alerts'"></span>
+        </button>
+
+        <button @click="window.print()" class="flex items-center gap-1.5 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded-lg transition">
+          <i data-lucide="printer" class="w-4 h-4"></i>
+          Print Sheet
+        </button>
+      </div>
+    </header>
+
+    <!-- ERROR ALERT -->
+    <div x-show="syncError" class="no-print mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded-lg text-xs flex justify-between items-center">
+      <span x-text="syncError"></span>
+      <button @click="syncError = null" class="font-bold">&times;</button>
+    </div>
+
+    <!-- STATS SUMMARY -->
+    <div class="no-print grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-center">
+        <div class="text-2xl font-bold text-gray-900" x-text="items.length">0</div>
+        <div class="text-xs text-gray-500 uppercase font-medium">Total Items</div>
+      </div>
+      <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-center">
+        <div class="text-2xl font-bold text-red-600" x-text="getExpiredCount()">0</div>
+        <div class="text-xs text-gray-500 uppercase font-medium">Expired</div>
+      </div>
+      <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-center">
+        <div class="text-2xl font-bold text-amber-600" x-text="getWarningCount()">0</div>
+        <div class="text-xs text-gray-500 uppercase font-medium">Expiring Soon</div>
+      </div>
+      <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-center">
+        <div class="text-2xl font-bold text-green-600" x-text="getGoodCount()">0</div>
+        <div class="text-xs text-gray-500 uppercase font-medium">Good Standing</div>
+      </div>
+    </div>
+
+    <!-- ADD FORM -->
+    <div class="no-print bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
+      <h2 class="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+        <i data-lucide="plus-circle" class="w-4 h-4 text-gray-600"></i> Add Item to Stash
+      </h2>
+      <form @submit.prevent="addItem()" class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <input type="text" x-model="newItem.Name" placeholder="Item Name (e.g., Tinned Tomatoes)" required
+               class="sm:col-span-1 p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none">
+        
+        <select x-model="newItem.Category" class="p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none">
+          <option value="Tins">Tins & Cans</option>
+          <option value="Dry Goods">Dry Goods (Rice/Pasta)</option>
+          <option value="Water">Water & Drinks</option>
+          <option value="Medical">Medical / First Aid</option>
+          <option value="Other">Other Supplies</option>
+        </select>
+
+        <input type="number" x-model="newItem.Quantity" min="1" placeholder="Qty" required
+               class="p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none">
+
+        <input type="date" x-model="newItem.ExpiryDate" required
+               class="p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none">
+
+        <button type="submit" :disabled="isLoading" class="sm:col-span-4 bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 rounded-lg text-sm transition flex justify-center items-center gap-2">
+          <i data-lucide="plus" class="w-4 h-4"></i> Save to Shared Stash
+        </button>
+      </form>
+    </div>
+
+    <!-- INVENTORY TABLE -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div class="p-4 border-b border-gray-200 flex justify-between items-center no-print">
+        <h2 class="font-bold text-gray-800">Current Stock Inventory</h2>
+        <span class="text-xs text-gray-500">Auto-sorted by earliest Best Before date</span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-gray-50 border-b border-gray-200 text-gray-600 uppercase text-xs">
+            <tr>
+              <th class="p-3">Item Name</th>
+              <th class="p-3">Category</th>
+              <th class="p-3 text-center">Qty</th>
+              <th class="p-3">Best Before</th>
+              <th class="p-3 text-center no-print">Status</th>
+              <th class="p-3 text-right no-print">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            <template x-for="(item, index) in sortedItems()" :key="index">
+              <tr :class="getDaysRemaining(item.ExpiryDate) < 0 ? 'bg-red-50' : (getDaysRemaining(item.ExpiryDate) <= 14 ? 'bg-amber-50' : '')">
+                <td class="p-3 font-semibold text-gray-900" x-text="item.Name"></td>
+                <td class="p-3 text-gray-600">
+                  <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700" x-text="item.Category"></span>
+                </td>
+                <td class="p-3 text-center font-bold" x-text="item.Quantity"></td>
+                <td class="p-3 font-mono text-xs" x-text="formatDate(item.ExpiryDate)"></td>
+                <td class="p-3 text-center no-print">
+                  <template x-if="getDaysRemaining(item.ExpiryDate) < 0">
+                    <span class="px-2 py-1 text-xs font-bold rounded bg-red-200 text-red-800">Expired</span>
+                  </template>
+                  <template x-if="getDaysRemaining(item.ExpiryDate) >= 0 && getDaysRemaining(item.ExpiryDate) <= 14">
+                    <span class="px-2 py-1 text-xs font-bold rounded bg-amber-200 text-amber-800" x-text="getDaysRemaining(item.ExpiryDate) + ' days left'"></span>
+                  </template>
+                  <template x-if="getDaysRemaining(item.ExpiryDate) > 14">
+                    <span class="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800">OK</span>
+                  </template>
+                </td>
+                <td class="p-3 text-right no-print">
+                  <button @click="removeItem(item)" class="text-red-500 hover:text-red-700 p-1 transition" title="Use / Rotate Item">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                  </button>
+                </td>
+              </tr>
+            </template>
+            <template x-if="items.length === 0">
+              <tr>
+                <td colspan="6" class="p-6 text-center text-gray-400">No items added to the emergency stash yet.</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SCRIPT LOGIC -->
+  <script>
+    function stashApp() {
+      return {
+        items: [],
+        isLoading: false,
+        syncError: null,
+        notificationsEnabled: false,
+        newItem: { Name: '', Category: 'Tins', Quantity: 1, ExpiryDate: '' },
+
+        async initApp() {
+          this.$nextTick(() => lucide.createIcons());
+          await this.fetchFromGoogle();
+          this.checkNotificationStatus();
+          this.checkExpiringItemsAlert();
+        },
+
+        sortedItems() {
+          return this.items.slice().sort((a, b) => new Date(a.ExpiryDate) - new Date(b.ExpiryDate));
+        },
+
+        async fetchFromGoogle() {
+          if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YOUR_SCRIPT_ID_HERE")) {
+            this.syncError = "Please replace GOOGLE_SCRIPT_URL at line 18 in index.html with your Google Web App URL.";
+            return;
+          }
+
+          this.isLoading = true;
+          this.syncError = null;
+
+          try {
+            const response = await fetch(GOOGLE_SCRIPT_URL);
+            if (!response.ok) throw new Error("Failed to reach Google Script backend");
+            const data = await response.json();
+            this.items = Array.isArray(data) ? data : [];
+            this.$nextTick(() => lucide.createIcons());
+          } catch (err) {
+            console.error(err);
+            this.syncError = "Failed to sync with Google Sheet. Check internet connection.";
+          } finally {
+            this.isLoading = false;
+          }
+        },
+
+        async syncToGoogle() {
+          if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YOUR_SCRIPT_ID_HERE")) return;
+
+          this.isLoading = true;
+          this.syncError = null;
+
+          try {
+            const response = await fetch(GOOGLE_SCRIPT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(this.items)
+            });
+            if (!response.ok) throw new Error("Failed to save to Google Sheet");
+          } catch (err) {
+            console.error(err);
+            this.syncError = "Error saving changes to Google Sheet.";
+          } finally {
+            this.isLoading = false;
+          }
+        },
+
+        async addItem() {
+          if (!this.newItem.Name || !this.newItem.ExpiryDate) return;
+          this.items.push({ ...this.newItem });
+          await this.syncToGoogle();
+          this.newItem = { Name: '', Category: 'Tins', Quantity: 1, ExpiryDate: '' };
+          this.$nextTick(() => lucide.createIcons());
+        },
+
+        async removeItem(itemToRemove) {
+          this.items = this.items.filter(item => item !== itemToRemove);
+          await this.syncToGoogle();
+        },
+
+        getDaysRemaining(dateString) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const target = new Date(dateString);
+          return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+        },
+
+        getExpiredCount() {
+          return this.items.filter(i => this.getDaysRemaining(i.ExpiryDate) < 0).length;
+        },
+
+        getWarningCount() {
+          return this.items.filter(i => {
+            const days = this.getDaysRemaining(i.ExpiryDate);
+            return days >= 0 && days <= 14;
+          }).length;
+        },
+
+        getGoodCount() {
+          return this.items.filter(i => this.getDaysRemaining(i.ExpiryDate) > 14).length;
+        },
+
+        formatDate(dateString) {
+          if (!dateString) return '';
+          const d = new Date(dateString);
+          return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        },
+
+        checkNotificationStatus() {
+          if ("Notification" in window) {
+            this.notificationsEnabled = Notification.permission === "granted";
+          }
+        },
+
+        async requestNotificationPermission() {
+          if (!("Notification" in window)) {
+            alert("This browser does not support notifications.");
+            return;
+          }
+          const permission = await Notification.requestPermission();
+          this.notificationsEnabled = permission === "granted";
+          if (this.notificationsEnabled) {
+            this.checkExpiringItemsAlert();
+          }
+        },
+
+        checkExpiringItemsAlert() {
+          if (!this.notificationsEnabled) return;
+          const expiringItems = this.items.filter(i => {
+            const days = this.getDaysRemaining(i.ExpiryDate);
+            return days >= 0 && days <= 7;
+          });
+
+          if (expiringItems.length > 0) {
+            const itemNames = expiringItems.map(i => i.Name).join(", ");
+            new Notification("Emergency Stash Alert! ⚠️", {
+              body: `${expiringItems.length} item(s) expire within a week: ${itemNames}. Time to cycle into dinner!`,
+              icon: "https://cdn-icons-png.flaticon.com/512/3602/3602123.png"
+            });
+          }
+        }
+      };
+    }
+  </script>
+</body>
+</html>
