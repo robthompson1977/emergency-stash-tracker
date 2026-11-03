@@ -169,6 +169,43 @@
 
   </div>
 
+  // Register Service Worker for PWA Notifications
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+            .then(reg => {
+                console.log('Service Worker registered successfully:', reg.scope);
+            })
+            .catch(err => {
+                console.error('Service Worker registration failed:', err);
+            });
+    });
+}
+
+// Function to request notification permissions and trigger alerts
+function triggerPantryAlert(titleText, bodyText) {
+    if (!('Notification' in window)) {
+        alert('This browser does not support desktop notifications.');
+        return;
+    }
+
+    Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+            navigator.serviceWorker.ready.then(registration => {
+                // Send message to Service Worker to display the persistent notification
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'SHOW_NOTIFICATION',
+                    title: titleText,
+                    body: bodyText
+                });
+            });
+        } else {
+            console.warn('Notification permission denied.');
+        }
+    });
+}
+  
+
   <!-- SCRIPT LOGIC -->
   <script>
     function stashApp() {
